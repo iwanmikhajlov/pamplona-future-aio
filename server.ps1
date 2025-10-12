@@ -1004,23 +1004,31 @@ function Test-PortAvailable {
         [int]$Port
     )
 
-    $tcpConnections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-                      Where-Object { $_.LocalPort -eq $Port }
+    try {
+        $tcpConnections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+                          Where-Object { $_.LocalPort -eq $Port }
 
-    if ($tcpConnections) {
-        $processId = $tcpConnections[0].OwningProcess
-        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($tcpConnections) {
+            $processId = $tcpConnections[0].OwningProcess
+            $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+
+            return @{
+                Available = $false
+                ProcessId = $processId
+                ProcessName = if ($process) { $process.ProcessName } else { "Unknown" }
+                ProcessPath = if ($process) { $process.Path } else { "Unknown" }
+            }
+        }
 
         return @{
-            Available = $false
-            ProcessId = $processId
-            ProcessName = if ($process) { $process.ProcessName } else { "Unknown" }
-            ProcessPath = if ($process) { $process.Path } else { "Unknown" }
+            Available = $true
         }
     }
-
-    return @{
-        Available = $true
+    catch {
+        # If Get-NetTCPConnection fails, assume port is available
+        return @{
+            Available = $true
+        }
     }
 }
 
@@ -1176,7 +1184,11 @@ function Start-Server {
     # Start deployment
     Draw-Header -Title "Deployment Progress" -Width $Config.UI.DefaultWidth
 
-    docker network create $($Config.Docker.Network) 2>&1 | Out-Null
+    # Create network if it doesn't exist
+    $networkExists = docker network ls --filter "name=^$($Config.Docker.Network)$" --format "{{.Name}}" 2>$null
+    if ($networkExists -ne $Config.Docker.Network) {
+        docker network create $($Config.Docker.Network) 2>&1 | Out-Null
+    }
 
     $boxWidth = $Config.UI.DefaultWidth
 
