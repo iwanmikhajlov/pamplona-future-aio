@@ -1065,7 +1065,7 @@ function Test-RequiredPorts {
     }
 
     if ($portsInUse.Count -gt 0) {
-        $messages = @("The following ports are already in use:", "")
+        $messages = @("The following ports are already in use:", " ")
 
         foreach ($portInfo in $portsInUse) {
             $messages += "Port $($portInfo.Port) ($($portInfo.Description)):"
@@ -1078,7 +1078,7 @@ function Test-RequiredPorts {
                 }
                 $messages += "  Path: $pathDisplay"
             }
-            $messages += ""
+            $messages += " "
         }
 
         $messages += "Please close these applications before continuing."
