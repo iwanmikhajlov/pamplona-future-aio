@@ -695,7 +695,7 @@ function Update-ProgressLine {
 
     # Move cursor to the specific line
     $targetPos = $BaseCursorPos
-    $targetPos.Y = $BaseCursorPos.Y - 3 + $LineOffset
+    $targetPos.Y = $BaseCursorPos.Y - 5 + $LineOffset
     $targetPos.X = 0
     $Host.UI.RawUI.CursorPosition = $targetPos
 
@@ -1089,6 +1089,69 @@ function Test-RequiredPorts {
     return $true
 }
 
+<#
+.SYNOPSIS
+    Ensures Docker image is available locally (pulls if missing).
+.PARAMETER ImageName
+    Name of the Docker image to check/pull (can include tag).
+.PARAMETER Task
+    Task name for progress display.
+.PARAMETER LineOffset
+    Line offset in progress box.
+.PARAMETER BaseCursorPos
+    Base cursor position for progress updates.
+.OUTPUTS
+    Boolean indicating if image is available.
+#>
+function Confirm-DockerImage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ImageName,
+
+        [Parameter()]
+        [string]$Task = "Image",
+
+        [Parameter()]
+        [int]$LineOffset = 0,
+
+        [Parameter()]
+        $BaseCursorPos = $null
+    )
+
+    # Normalize image name (handle cases with or without tag)
+    $pullImageName = $ImageName
+    if ($ImageName -notmatch ':') {
+        $pullImageName = "${ImageName}:latest"
+    }
+
+    # Extract repository and tag for checking
+    $parts = $ImageName -split ':'
+    $repository = $parts[0]
+    $tag = if ($parts.Count -gt 1) { $parts[1] } else { "latest" }
+
+    # Check if image exists locally
+    $imageCheck = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null | Where-Object { $_ -eq "${repository}:${tag}" }
+
+    if ($imageCheck) {
+        return $true
+    }
+
+    # Image doesn't exist, need to pull it
+    if ($BaseCursorPos) {
+        Update-ProgressLine -LineOffset $LineOffset -Task $Task -Status "Pulling..." -StatusType "Info" -BaseCursorPos $BaseCursorPos
+    }
+
+    $pullOutput = docker pull $pullImageName 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    return $true
+}
+
 #endregion
 
 #region Server Management Functions
@@ -1192,14 +1255,14 @@ function Start-Server {
 
     $boxWidth = $Config.UI.DefaultWidth
 
-    # Draw complete progress box
+    # Draw complete progress box with 3 lines (DB Image, Server Image, DB Container, Server Container)
     Write-Host "$($Box.TopLeft)" -NoNewline -ForegroundColor $ColorScheme.Primary
     Write-Host ($Box.Horizontal * ($boxWidth - 2)) -NoNewline -ForegroundColor $ColorScheme.Primary
     Write-Host "$($Box.TopRight)" -ForegroundColor $ColorScheme.Primary
 
-    # Database line
-    $taskLine = "  Database"
-    $statusLine = "$([char]0x25CF) Starting..."
+    # Database Image line
+    $taskLine = "  Database Image"
+    $statusLine = "$([char]0x25CF) Checking..."
     $contentWidth = $boxWidth - 4
     $padding = [Math]::Max(0, $contentWidth - $taskLine.Length - $statusLine.Length)
 
@@ -1209,7 +1272,29 @@ function Start-Server {
     Write-Host $statusLine -NoNewline -ForegroundColor $ColorScheme.Info
     Write-Host " $($Box.Vertical)" -ForegroundColor $ColorScheme.Primary
 
-    # Server line
+    # Server Image line
+    $taskLine = "  Server Image"
+    $statusLine = "  Waiting..."
+    $padding = [Math]::Max(0, $contentWidth - $taskLine.Length - $statusLine.Length)
+
+    Write-Host "$($Box.Vertical) " -NoNewline -ForegroundColor $ColorScheme.Primary
+    Write-Host $taskLine -NoNewline -ForegroundColor $ColorScheme.Info
+    Write-Host (" " * $padding) -NoNewline
+    Write-Host $statusLine -NoNewline -ForegroundColor $ColorScheme.Muted
+    Write-Host " $($Box.Vertical)" -ForegroundColor $ColorScheme.Primary
+
+    # Database Container line
+    $taskLine = "  Database"
+    $statusLine = "  Waiting..."
+    $padding = [Math]::Max(0, $contentWidth - $taskLine.Length - $statusLine.Length)
+
+    Write-Host "$($Box.Vertical) " -NoNewline -ForegroundColor $ColorScheme.Primary
+    Write-Host $taskLine -NoNewline -ForegroundColor $ColorScheme.Info
+    Write-Host (" " * $padding) -NoNewline
+    Write-Host $statusLine -NoNewline -ForegroundColor $ColorScheme.Muted
+    Write-Host " $($Box.Vertical)" -ForegroundColor $ColorScheme.Primary
+
+    # Server Container line
     $taskLine = "  Server"
     $statusLine = "  Waiting..."
     $padding = [Math]::Max(0, $contentWidth - $taskLine.Length - $statusLine.Length)
@@ -1227,6 +1312,37 @@ function Start-Server {
     # Store initial cursor position
     $initialCursorPos = $Host.UI.RawUI.CursorPosition
 
+    # Check/pull database image
+    if (-not (Confirm-DockerImage -ImageName $Config.Docker.DatabaseImage -Task "Database Image" -LineOffset 0 -BaseCursorPos $initialCursorPos)) {
+        Update-ProgressLine -LineOffset 0 -Task "Database Image" -Status "Failed" -StatusType "Error" -BaseCursorPos $initialCursorPos
+        $Host.UI.RawUI.CursorPosition = $initialCursorPos
+
+        Write-Host ""
+        Write-Host ""
+        Write-Host " Failed to pull database image: $($Config.Docker.DatabaseImage)" -ForegroundColor $ColorScheme.Error
+        Wait-Enter
+        return
+    }
+    Update-ProgressLine -LineOffset 0 -Task "Database Image" -Status "Ready" -StatusType "Success" -BaseCursorPos $initialCursorPos
+
+    # Check/pull server image
+    Update-ProgressLine -LineOffset 1 -Task "Server Image" -Status "Checking..." -StatusType "Info" -BaseCursorPos $initialCursorPos
+
+    if (-not (Confirm-DockerImage -ImageName $Config.Docker.ServerImage -Task "Server Image" -LineOffset 1 -BaseCursorPos $initialCursorPos)) {
+        Update-ProgressLine -LineOffset 1 -Task "Server Image" -Status "Failed" -StatusType "Error" -BaseCursorPos $initialCursorPos
+        $Host.UI.RawUI.CursorPosition = $initialCursorPos
+
+        Write-Host ""
+        Write-Host ""
+        Write-Host " Failed to pull server image: $($Config.Docker.ServerImage)" -ForegroundColor $ColorScheme.Error
+        Wait-Enter
+        return
+    }
+    Update-ProgressLine -LineOffset 1 -Task "Server Image" -Status "Ready" -StatusType "Success" -BaseCursorPos $initialCursorPos
+
+    # Update database container status to Starting
+    Update-ProgressLine -LineOffset 2 -Task "Database" -Status "Starting..." -StatusType "Info" -BaseCursorPos $initialCursorPos
+
     # Start database container
     $dbResult = docker run -d `
       --name $($Config.Docker.DatabaseContainer) `
@@ -1239,7 +1355,7 @@ function Start-Server {
       $($Config.Docker.DatabaseImage) 2>&1
 
     if ($LASTEXITCODE -ne 0) {
-        Update-ProgressLine -LineOffset 0 -Task "Database" -Status "Failed" -StatusType "Error" -BaseCursorPos $initialCursorPos
+        Update-ProgressLine -LineOffset 2 -Task "Database" -Status "Failed" -StatusType "Error" -BaseCursorPos $initialCursorPos
         $Host.UI.RawUI.CursorPosition = $initialCursorPos
 
         Show-DockerRunError -ErrorTitle "Database" -ErrorOutput $dbResult `
@@ -1257,7 +1373,7 @@ function Start-Server {
         $elapsed += $waitInterval
 
         if (-not (Test-ContainerRunning $Config.Docker.DatabaseContainer)) {
-            Update-ProgressLine -LineOffset 0 -Task "Database" -Status "Stopped" -StatusType "Error" -BaseCursorPos $initialCursorPos
+            Update-ProgressLine -LineOffset 2 -Task "Database" -Status "Stopped" -StatusType "Error" -BaseCursorPos $initialCursorPos
             $Host.UI.RawUI.CursorPosition = $initialCursorPos
 
             Show-DeploymentError -ErrorTitle "Database" `
@@ -1275,7 +1391,7 @@ function Start-Server {
     }
 
     if (-not $dbReady) {
-        Update-ProgressLine -LineOffset 0 -Task "Database" -Status "Timeout" -StatusType "Error" -BaseCursorPos $initialCursorPos
+        Update-ProgressLine -LineOffset 2 -Task "Database" -Status "Timeout" -StatusType "Error" -BaseCursorPos $initialCursorPos
         $Host.UI.RawUI.CursorPosition = $initialCursorPos
 
         Show-DeploymentError -ErrorTitle "Database" `
@@ -1286,10 +1402,10 @@ function Start-Server {
     }
 
     # Update database status to Ready
-    Update-ProgressLine -LineOffset 0 -Task "Database" -Status "Ready" -StatusType "Success" -BaseCursorPos $initialCursorPos
+    Update-ProgressLine -LineOffset 2 -Task "Database" -Status "Ready" -StatusType "Success" -BaseCursorPos $initialCursorPos
 
     # Update server status to Starting
-    Update-ProgressLine -LineOffset 1 -Task "Server" -Status "Starting..." -StatusType "Info" -BaseCursorPos $initialCursorPos
+    Update-ProgressLine -LineOffset 3 -Task "Server" -Status "Starting..." -StatusType "Info" -BaseCursorPos $initialCursorPos
 
     # Start server container
     $serverResult = docker run -d `
@@ -1315,7 +1431,7 @@ function Start-Server {
       $($Config.Docker.ServerImage) 2>&1
 
     if ($LASTEXITCODE -ne 0) {
-        Update-ProgressLine -LineOffset 1 -Task "Server" -Status "Failed" -StatusType "Error" -BaseCursorPos $initialCursorPos
+        Update-ProgressLine -LineOffset 3 -Task "Server" -Status "Failed" -StatusType "Error" -BaseCursorPos $initialCursorPos
         $Host.UI.RawUI.CursorPosition = $initialCursorPos
 
         Show-DockerRunError -ErrorTitle "Server" -ErrorOutput $serverResult `
@@ -1335,7 +1451,7 @@ function Start-Server {
 
         # Check if server is restarting
         if ($serverStatus -match "restarting" -or ($currentRestartCount -and $currentRestartCount -match '^\d+$' -and [int]$currentRestartCount -gt 0)) {
-            Update-ProgressLine -LineOffset 1 -Task "Server" -Status "Restarting" -StatusType "Error" -BaseCursorPos $initialCursorPos
+            Update-ProgressLine -LineOffset 3 -Task "Server" -Status "Restarting" -StatusType "Error" -BaseCursorPos $initialCursorPos
             $Host.UI.RawUI.CursorPosition = $initialCursorPos
 
             Show-DeploymentError -ErrorTitle "Server" `
@@ -1347,7 +1463,7 @@ function Start-Server {
 
         # Check if server exited
         if ($serverStatus -match "exited") {
-            Update-ProgressLine -LineOffset 1 -Task "Server" -Status "Exited" -StatusType "Error" -BaseCursorPos $initialCursorPos
+            Update-ProgressLine -LineOffset 3 -Task "Server" -Status "Exited" -StatusType "Error" -BaseCursorPos $initialCursorPos
             $Host.UI.RawUI.CursorPosition = $initialCursorPos
 
             Show-DeploymentError -ErrorTitle "Server" `
@@ -1365,7 +1481,7 @@ function Start-Server {
     }
 
     if (-not $serverHealthy) {
-        Update-ProgressLine -LineOffset 1 -Task "Server" -Status "Timeout" -StatusType "Error" -BaseCursorPos $initialCursorPos
+        Update-ProgressLine -LineOffset 3 -Task "Server" -Status "Timeout" -StatusType "Error" -BaseCursorPos $initialCursorPos
         $Host.UI.RawUI.CursorPosition = $initialCursorPos
 
         Show-DeploymentError -ErrorTitle "Server" `
@@ -1376,7 +1492,7 @@ function Start-Server {
     }
 
     # Update server status to Running
-    Update-ProgressLine -LineOffset 1 -Task "Server" -Status "Running" -StatusType "Success" -BaseCursorPos $initialCursorPos
+    Update-ProgressLine -LineOffset 3 -Task "Server" -Status "Running" -StatusType "Success" -BaseCursorPos $initialCursorPos
 
     # Move cursor to end
     $Host.UI.RawUI.CursorPosition = $initialCursorPos
