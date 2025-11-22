@@ -21,7 +21,7 @@ $script:Config = @{
         ServerContainer = "pf-srv"
         DatabaseVolume = "pf-db-vol"
         MitmVolume = "/pf-mitm-vol"
-        ServerImage = "ghcr.io/iwanmikhajlov/pamplona-future-aio"
+        ServerImage = "ghcr.io/oomchiller/pamplona-future-aio"
         DatabaseImage = "postgres:17"
     }
 
@@ -1651,7 +1651,7 @@ function Show-Credits {
     Write-Host "(core development)" -ForegroundColor $ColorScheme.Muted
     Write-Host ""
     Write-Host "    $([char]0x2022) " -NoNewline -ForegroundColor $ColorScheme.Primary  # •
-    Write-Host "iwanmikhajlov " -NoNewline -ForegroundColor $ColorScheme.Info
+    Write-Host "oomchiller " -NoNewline -ForegroundColor $ColorScheme.Info
     Write-Host "(dockerization & scripting)" -ForegroundColor $ColorScheme.Muted
     Write-Host ""
     Write-Host "    $([char]0x2022) " -NoNewline -ForegroundColor $ColorScheme.Primary  # •
