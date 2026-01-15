@@ -22,7 +22,7 @@ Fork with pretty menu and plug-and-play dockerization for easy local server setu
 2. **Open PowerShell** and run:
 
    ```powershell
-   irm https://iwanmikhajlov.github.io/pamplona-future-aio/server.ps1 | iex
+   irm https://oomchiller.github.io/pamplona-future-aio/server.ps1 | iex
    ```
 
 3. **Follow the menu** to install and configure the server
@@ -44,7 +44,7 @@ If you want to tinker it for some reason:
 Clone repo and edit dockerfile, use docker-compose and .env from upstream branch, etc.
 
 ```bash
-git clone https://github.com/iwanmikhajlov/pamplona-future-aio
+git clone https://github.com/oomchiller/pamplona-future-aio
 cd pamplona-future-aio
 git checkout aio
 docker build -t pamplona-future .
