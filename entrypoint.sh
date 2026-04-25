@@ -22,6 +22,6 @@ trap cleanup SIGTERM SIGINT
 
 export DATABASE_URL="${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOSTNAME}:${POSTGRES_PORT}/${POSTGRES_DB}}"
 
-npm run resetdb && npx tsx ./src/ &
+pnpm exec prisma db push && pnpm exec prisma db seed && pnpm exec tsx ./src/ &
 
 wait $!
