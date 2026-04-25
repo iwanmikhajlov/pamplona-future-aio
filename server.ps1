@@ -1217,17 +1217,13 @@ function Start-Server {
     Write-Host ""
 
     # Get game path
-    $gamePath = Read-Input -Prompt "Mirror's Edge Catalyst installation path:" -Default $Config.DefaultGamePath
-
-    if (-not (Test-Path $gamePath)) {
-        Show-MessageBox -Title "Invalid Path" -Message @(
-            "The specified path does not exist:",
-            "",
-            $gamePath,
-            "",
-            "Please check the path and try again."
-        ) -Type "Error"
-        return
+    while ($true) {
+        $gamePath = Read-Input -Prompt "Mirror's Edge Catalyst installation path:" -Default $Config.DefaultGamePath
+        if (Test-Path $gamePath) { break }
+        Write-Host ""
+        Write-Host " $([char]0x2717) Couldn't locate game files in specified path." -ForegroundColor $ColorScheme.Error
+        Wait-Enter -Prompt "Press ENTER to try again"
+        Write-Host ""
     }
 
     Write-Host ""
