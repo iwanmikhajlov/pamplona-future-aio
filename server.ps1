@@ -23,6 +23,7 @@ $script:Config = @{
         MitmVolume = "/pf-mitm-vol"
         ServerImage = "ghcr.io/oomchiller/pamplona-future-aio"
         DatabaseImage = "postgres:17"
+        ServerHostname = "localhost"
     }
 
     # Default configuration values
@@ -464,6 +465,27 @@ function Show-MessageBox {
     Wait-Enter
 }
 
+function Draw-LogLines {
+    param(
+        [string[]]$Lines,
+        [int]$Width
+    )
+
+    foreach ($line in $Lines) {
+        $trimmed = $line.Trim()
+        $maxLength = $Width - 2
+        if ($trimmed.Length -gt $maxLength) {
+            $trimmed = $trimmed.Substring(0, $maxLength)
+        }
+        $padding = [Math]::Max(0, $maxLength - $trimmed.Length)
+
+        Write-Host "$($Box.Vertical) " -NoNewline -ForegroundColor $ColorScheme.Muted
+        Write-Host $trimmed -NoNewline -ForegroundColor $ColorScheme.Info
+        Write-Host (" " * $padding) -NoNewline
+        Write-Host " $($Box.Vertical)" -ForegroundColor $ColorScheme.Muted
+    }
+}
+
 <#
 .SYNOPSIS
     Displays container logs in a formatted box.
@@ -487,25 +509,23 @@ function Show-ContainerLogs {
     Write-Host "$($Box.TopRight)" -ForegroundColor $ColorScheme.Muted
 
     $logs = docker logs --tail $($Config.UI.LogTailLines) $ContainerName 2>&1
-    $logLines = $logs -split "`n"
-
-    foreach ($line in $logLines) {
-        $trimmed = $line.Trim()
-        $maxLength = $Width - 2
-        if ($trimmed.Length -gt $maxLength) {
-            $trimmed = $trimmed.Substring(0, $maxLength)
-        }
-        $padding = [Math]::Max(0, $maxLength - $trimmed.Length)
-
-        Write-Host "$($Box.Vertical) " -NoNewline -ForegroundColor $ColorScheme.Muted
-        Write-Host $trimmed -NoNewline -ForegroundColor $ColorScheme.Info
-        Write-Host (" " * $padding) -NoNewline
-        Write-Host " $($Box.Vertical)" -ForegroundColor $ColorScheme.Muted
-    }
+    Draw-LogLines -Lines ($logs -split "`n") -Width $Width
 
     Write-Host "$($Box.BottomLeft)" -NoNewline -ForegroundColor $ColorScheme.Muted
     Write-Host ($Box.Horizontal * $Width) -NoNewline -ForegroundColor $ColorScheme.Muted
     Write-Host "$($Box.BottomRight)" -ForegroundColor $ColorScheme.Muted
+}
+
+function Remove-DeploymentArtifacts {
+    param(
+        [string[]]$Containers = @()
+    )
+
+    foreach ($container in $Containers) {
+        docker rm -f $container 2>&1 | Out-Null
+    }
+    docker volume rm $($Config.Docker.DatabaseVolume) 2>&1 | Out-Null
+    docker network rm $($Config.Docker.Network) 2>&1 | Out-Null
 }
 
 <#
@@ -550,13 +570,7 @@ function Show-DeploymentError {
     # Cleanup resources
     Write-Host ""
     Write-Host " Cleaning up resources..." -ForegroundColor $ColorScheme.Warning
-
-    foreach ($container in $CleanupContainers) {
-        docker rm -f $container 2>&1 | Out-Null
-    }
-    docker volume rm $($Config.Docker.DatabaseVolume) 2>&1 | Out-Null
-    docker network rm $($Config.Docker.Network) 2>&1 | Out-Null
-
+    Remove-DeploymentArtifacts -Containers $CleanupContainers
     Write-Host " $([char]0x2713) Cleanup complete" -ForegroundColor $ColorScheme.Success
 
     Write-Host ""
@@ -602,19 +616,7 @@ function Show-DockerRunError {
     Write-Host ($Box.Horizontal * $Config.UI.LogBoxWidth) -NoNewline -ForegroundColor $ColorScheme.Muted
     Write-Host "$($Box.TopRight)" -ForegroundColor $ColorScheme.Muted
 
-    foreach ($line in $errorLines) {
-        $trimmed = $line.Trim()
-        $maxLength = $Config.UI.LogBoxWidth - 2
-        if ($trimmed.Length -gt $maxLength) {
-            $trimmed = $trimmed.Substring(0, $maxLength)
-        }
-        $padding = [Math]::Max(0, $maxLength - $trimmed.Length)
-
-        Write-Host "$($Box.Vertical) " -NoNewline -ForegroundColor $ColorScheme.Muted
-        Write-Host $trimmed -NoNewline -ForegroundColor $ColorScheme.Info
-        Write-Host (" " * $padding) -NoNewline
-        Write-Host " $($Box.Vertical)" -ForegroundColor $ColorScheme.Muted
-    }
+    Draw-LogLines -Lines $errorLines -Width $Config.UI.LogBoxWidth
 
     Write-Host "$($Box.BottomLeft)" -NoNewline -ForegroundColor $ColorScheme.Muted
     Write-Host ($Box.Horizontal * $Config.UI.LogBoxWidth) -NoNewline -ForegroundColor $ColorScheme.Muted
@@ -623,13 +625,7 @@ function Show-DockerRunError {
     # Cleanup resources
     Write-Host ""
     Write-Host " Cleaning up resources..." -ForegroundColor $ColorScheme.Warning
-
-    foreach ($container in $CleanupContainers) {
-        docker rm -f $container 2>&1 | Out-Null
-    }
-    docker volume rm $($Config.Docker.DatabaseVolume) 2>&1 | Out-Null
-    docker network rm $($Config.Docker.Network) 2>&1 | Out-Null
-
+    Remove-DeploymentArtifacts -Containers $CleanupContainers
     Write-Host " $([char]0x2713) Cleanup complete" -ForegroundColor $ColorScheme.Success
 
     Write-Host ""
@@ -927,7 +923,7 @@ function Test-ContainerExists {
     )
 
     $exists = docker ps -a --filter "name=^${ContainerName}$" --format "{{.Names}}" 2>$null
-    return $exists -eq $ContainerName
+    return ($exists -contains $ContainerName)
 }
 
 <#
@@ -947,7 +943,7 @@ function Test-ContainerRunning {
     )
 
     $status = docker ps --filter "name=^${ContainerName}$" --format "{{.Names}}" 2>$null
-    return $status -eq $ContainerName
+    return ($status -contains $ContainerName)
 }
 
 <#
@@ -1192,9 +1188,21 @@ function Start-Server {
 
             docker start $($Config.Docker.DatabaseContainer) 2>$null
             docker start $($Config.Docker.ServerContainer) 2>$null
-            Start-Sleep -Seconds 2
+
+            # Wait for DB to become ready
+            $elapsed = 0
+            $dbReady = $false
+            while ($elapsed -lt $Config.Timeouts.DatabaseReady) {
+                Start-Sleep -Seconds 1
+                $elapsed++
+                $null = docker exec $($Config.Docker.DatabaseContainer) pg_isready 2>&1
+                if ($LASTEXITCODE -eq 0) { $dbReady = $true; break }
+            }
 
             Write-Host ""
+            if (-not $dbReady) {
+                Write-Host " $([char]0x26A0) Warning: database may not be fully ready yet." -ForegroundColor $ColorScheme.Warning
+            }
             Write-Host " $([char]0x2713) Server started successfully!" -ForegroundColor $ColorScheme.Success
             Wait-Enter
             return
@@ -1348,9 +1356,9 @@ function Start-Server {
       --name $($Config.Docker.DatabaseContainer) `
       --restart unless-stopped `
       --network $($Config.Docker.Network) `
-      -e POSTGRES_USER=$dbUser `
-      -e POSTGRES_PASSWORD=$dbPassword `
-      -e POSTGRES_DB=$dbName `
+      -e "POSTGRES_USER=$dbUser" `
+      -e "POSTGRES_PASSWORD=$dbPassword" `
+      -e "POSTGRES_DB=$dbName" `
       -v "$($Config.Docker.DatabaseVolume):/var/lib/postgresql/data" `
       $($Config.Docker.DatabaseImage) 2>&1
 
@@ -1415,18 +1423,18 @@ function Start-Server {
       -p "$($Config.Ports.Gateway):$($Config.Ports.Gateway)" `
       -p "$($Config.Ports.Blaze):$($Config.Ports.Blaze)" `
       -p "$($Config.Ports.Game):$($Config.Ports.Game)" `
-      -e GATEWAY_PORT=$($Config.Ports.Gateway) `
-      -e BLAZE_PORT=$($Config.Ports.Blaze) `
-      -e POSTGRES_USER=$dbUser `
-      -e POSTGRES_PASSWORD=$dbPassword `
-      -e POSTGRES_DB=$dbName `
-      -e POSTGRES_HOSTNAME=$($Config.Docker.DatabaseContainer) `
-      -e POSTGRES_PORT=$($Config.Ports.PostgreSQL) `
-      -e HOSTNAME=localhost `
-      -e GAME_PATH=$($Config.Docker.MitmVolume) `
-      -e USER_ID=$userId `
-      -e PERSONA_ID=$personaId `
-      -e PERSONA_USERNAME=$personaUsername `
+      -e "GATEWAY_PORT=$($Config.Ports.Gateway)" `
+      -e "BLAZE_PORT=$($Config.Ports.Blaze)" `
+      -e "POSTGRES_USER=$dbUser" `
+      -e "POSTGRES_PASSWORD=$dbPassword" `
+      -e "POSTGRES_DB=$dbName" `
+      -e "POSTGRES_HOSTNAME=$($Config.Docker.DatabaseContainer)" `
+      -e "POSTGRES_PORT=$($Config.Ports.PostgreSQL)" `
+      -e "HOSTNAME=$($Config.Docker.ServerHostname)" `
+      -e "GAME_PATH=$($Config.Docker.MitmVolume)" `
+      -e "USER_ID=$userId" `
+      -e "PERSONA_ID=$personaId" `
+      -e "PERSONA_USERNAME=$personaUsername" `
       -v "${gamePath}:$($Config.Docker.MitmVolume)" `
       $($Config.Docker.ServerImage) 2>&1
 
@@ -1597,7 +1605,7 @@ function Stop-And-Remove-Server {
         return
     }
 
-    if (-not (Show-Confirm -Title "Confirm Removal" -Message "This will stop and remove all server artifacts and depencencies.")) {
+    if (-not (Show-Confirm -Title "Confirm Removal" -Message "This will stop and remove all server artifacts and dependencies.")) {
         Show-MessageBox -Title "Cancelled" -Message @(
             "Operation cancelled."
         ) -Type "Info"
@@ -1616,10 +1624,7 @@ function Stop-And-Remove-Server {
 
     Write-Host ""
     Write-Host " Removing resources..." -ForegroundColor $ColorScheme.Info
-    docker rm -f $($Config.Docker.ServerContainer) 2>&1 | Out-Null
-    docker rm -f $($Config.Docker.DatabaseContainer) 2>&1 | Out-Null
-    docker volume rm $($Config.Docker.DatabaseVolume) 2>&1 | Out-Null
-    docker network rm $($Config.Docker.Network) 2>&1 | Out-Null
+    Remove-DeploymentArtifacts -Containers @($Config.Docker.ServerContainer, $Config.Docker.DatabaseContainer)
     Write-Host " $([char]0x2713) Resources removed" -ForegroundColor $ColorScheme.Success
 
     Write-Host ""
@@ -1679,7 +1684,7 @@ $menuItems = @(
 while ($true) {
     $selection = Read-MenuSelection -Items $menuItems
 
-    if ($selection -eq -1 -or $selection -eq 5) {
+    if ($selection -eq -1 -or $selection -eq ($menuItems.Count - 1)) {
         Clear-Host
         Write-Host ""
         Write-Host ""
