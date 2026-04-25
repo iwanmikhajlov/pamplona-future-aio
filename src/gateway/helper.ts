@@ -127,7 +127,6 @@ export const extractUGCData = (
         ? {
             ugcId: {
               userId: ugc.creatorId,
-              // temp for promoted ugc testing
               id: ugc.reachThis?.id || randomUUID(),
             },
             name: ugc.name,
@@ -192,7 +191,6 @@ export const extractUGCData = (
         ? {
             ugcId: {
               userId: ugc.creatorId,
-              // temp for promoted ugc testing
               id: ugc.timeTrial?.id || randomUUID(),
             },
             name: ugc.name,
@@ -284,7 +282,6 @@ function value(val: unknown): string | undefined {
     case 'boolean':
       return `${val}`
     case 'function':
-      console.log('got function')
       return 'null'
     case 'object':
       if (val instanceof Date) return `"${val.toISOString()}"`

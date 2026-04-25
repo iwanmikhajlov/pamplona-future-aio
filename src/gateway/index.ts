@@ -1,8 +1,7 @@
 import Fastify from 'fastify'
 import { JSONRPCRequest, JSONRPCServer } from 'json-rpc-2.0'
 import fs from 'node:fs'
-import { chunkStringFixed, logger, monkeyStringify } from './helper'
-import { Readable } from 'node:stream'
+import { logger, monkeyStringify } from './helper'
 
 export interface ServerParams {
   session: string | undefined
@@ -27,9 +26,7 @@ for (const folder of folders) {
   }
 }
 
-const fastify = Fastify({
-  // logger: true,
-})
+const fastify = Fastify()
 
 fastify.options('*', (req, reply) => {
   reply.header('Access-Control-Allow-Origin', '*')
@@ -43,9 +40,6 @@ fastify.addContentTypeParser(
   { parseAs: 'buffer' },
   (req, body, done) => {
     logger.debug('Received encrypted request')
-    console.log(body.toString('hex'))
-
-    // reply.send({ jsonrpc: '2.0', id: null, result: null })
     done(null, req.body)
   }
 )
@@ -63,7 +57,6 @@ fastify.post('*', (req, reply) => {
   server.receive(jsonRPCRequest, { session }).then((response) => {
     logger.debug(method)
     logger.debug(jsonRPCRequest.params)
-    // console.log('res', response?.result)
 
     if (!response || response.error) {
       logger.error(`Error ${response?.error.message}`)
@@ -76,19 +69,10 @@ fastify.post('*', (req, reply) => {
     reply.raw.setHeader('Access-Control-Allow-Origin', '*')
 
     if (!response) {
-      return reply.send(
-        // chunkStringFixed(
-          monkeyStringify({ jsonrpc: '2.0', id: null, result: null })
-        // )
-      )
+      return reply.send(monkeyStringify({ jsonrpc: '2.0', id: null, result: null }))
     }
 
-    return reply.send(
-      // chunkStringFixed(
-        monkeyStringify(response as unknown as Record<string, unknown>)
-      // )
-    )
-    // return reply.send(response)
+    return reply.send(monkeyStringify(response as unknown as Record<string, unknown>))
   })
 })
 
