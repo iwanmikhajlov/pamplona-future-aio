@@ -12,8 +12,9 @@ async function main() {
     progression(prisma),
   ])
 
-  await prisma.user.create({
-    data: {
+  await prisma.user.upsert({
+    where: { personaId: process.env.PERSONA_ID ?? "133713371337" },
+    create: {
       name: process.env.PERSONA_USERNAME ?? "ploxxxxxxy",
       personaId: process.env.PERSONA_ID ?? "133713371337",
       division: 'Gold',
@@ -25,22 +26,8 @@ async function main() {
           detail: '3420869487',
         },
       },
-      // itemUnlocks: {
-      //   createMany: {
-      //     data: items.map((reward) => ({
-      //       itemId: reward.id,
-      //     })),
-      //   },
-      // },
-      // kitUnlocks: {
-      //   createMany: {
-      //     data: kits.map((kit) => ({
-      //       kitId: kit.id.toLowerCase(),
-      //       opened: kit.opened,
-      //     })),
-      //   },
-      // },
     },
+    update: {},
   })
 }
 

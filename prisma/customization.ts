@@ -7,16 +7,19 @@ import runnerKits from './resources/runnerKits.json'
 export async function seed(prisma: PrismaClient) {
   await prisma.kitType.createMany({
     data: kitTypes,
+    skipDuplicates: true,
   })
 
   await prisma.item.createMany({
     data: initialRewards,
+    skipDuplicates: true,
   })
 
   await prisma.$transaction(
     runnerKits.map((kit) => {
-      return prisma.kit.create({
-        data: {
+      return prisma.kit.upsert({
+        where: { id: kit.id },
+        create: {
           id: kit.id,
           name: kit.name,
           kitTypeRelation: {
@@ -29,6 +32,7 @@ export async function seed(prisma: PrismaClient) {
             })),
           },
         },
+        update: {},
       })
     })
   )

@@ -4,8 +4,9 @@ import namedChallenges from './resources/namedChallenges.json'
 export async function seed(prisma: PrismaClient) {
   await prisma.$transaction(
     namedChallenges.map((namedChallenge) => {
-      return prisma.challenge.create({
-        data: {
+      return prisma.challenge.upsert({
+        where: { id: namedChallenge.id },
+        create: {
           id: namedChallenge.id,
           contentId: namedChallenge.contentId,
           challengeType: namedChallenge.challengeType as ChallengeType,
@@ -18,6 +19,7 @@ export async function seed(prisma: PrismaClient) {
             ),
           },
         },
+        update: {},
       })
     })
   )
